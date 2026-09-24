@@ -9,8 +9,12 @@ export default function getToOpenAPISchemaFn(): ToOpenAPISchemaFn {
     // https://zod.dev/library-authors?id=how-to-support-zod-and-zod-mini-simultaneously#how-to-support-zod-3-and-zod-4-simultaneously
     if ("_zod" in (schema as $ZodType | ZodTypeAny)) {
       return getDefaultToOpenAPISchemaFn()(schema, {
-        components: context.components,
-        options: { io: "input", ...context.options },
+        ...context,
+        options: {
+          io: "input",
+          ...context.options,
+          ...(context.io && { io: context.io }),
+        },
       });
     }
 
@@ -19,7 +23,11 @@ export default function getToOpenAPISchemaFn(): ToOpenAPISchemaFn {
       const { schema: _schema, components } = createSchema(
         // @ts-expect-error
         schema,
-        { schemaType: "input", ...context.options },
+        {
+          schemaType: "input",
+          ...context.options,
+          ...(context.io && { schemaType: context.io }),
+        },
       );
 
       if (components) {

@@ -6,6 +6,28 @@
 
 Standard Schema Validator's OpenAPI Schema Converter
 
+## Photon fork
+
+The Photon package is `@photon-hq/standard-openapi`. It adds explicit request
+and response conversion:
+
+```ts
+import { toOpenAPISchema } from "@photon-hq/standard-openapi";
+import { z } from "zod/v4";
+
+const schema = z.object({ name: z.string().default("Ada") });
+const request = await toOpenAPISchema(schema, { io: "input" });
+const response = await toOpenAPISchema(schema, { io: "output" });
+// request: name is optional; response: name is required, extras are disallowed.
+```
+
+Zod 3 remains supported, with one known output-conversion limitation:
+`zod-openapi@4` omits `additionalProperties: false` for stripping objects.
+The generated Zod 3 output schema therefore permits fields that parsing removes.
+See [Photon conversion and compatibility notes](https://github.com/photon-hq/standard-openapi/blob/main/PHOTON.md)
+for component naming, custom adapters and the exact CI exception. The remaining
+examples below document the upstream package.
+
 ## Installation
 
 Install the main package -

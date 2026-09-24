@@ -42,6 +42,7 @@ export default function getToOpenAPISchemaFn(): ToOpenAPISchemaFn {
         return _jsonSchema;
       },
       ...context.options,
+      ...(context.io && { typeMode: context.io }),
     } satisfies ConversionConfig);
 
     if ("$schema" in openapiSchema) {
