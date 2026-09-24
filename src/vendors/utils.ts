@@ -9,13 +9,18 @@ export type OpenAPIMetadata = {
 
 export type ToOpenAPISchemaContext = {
   components: OpenAPIV3_1.ComponentsObject;
+  /** The value accepted by validation or produced by serialization. */
+  io?: "input" | "output";
   options?: Record<string, unknown>;
 };
 
 export type ToOpenAPISchemaFn = (
   schema: StandardSchemaV1,
   context: ToOpenAPISchemaContext,
-) => OpenAPIV3_1.SchemaObject | Promise<OpenAPIV3_1.SchemaObject>;
+) =>
+  | OpenAPIV3_1.SchemaObject
+  | OpenAPIV3_1.ReferenceObject
+  | Promise<OpenAPIV3_1.SchemaObject | OpenAPIV3_1.ReferenceObject>;
 
 export const errorMessageWrapper = (message: string) =>
   `standard-openapi: ${message}`;

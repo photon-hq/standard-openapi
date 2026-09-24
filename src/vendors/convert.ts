@@ -1,148 +1,111 @@
 import type { JSONSchema7 } from "json-schema";
 import type { OpenAPIV3_1 } from "openapi-types";
+import {
+  mapNodeReferences,
+  mapSchema,
+  pointerToken,
+  type Schema,
+  schemaName,
+} from "./schema.js";
 import type { ToOpenAPISchemaContext } from "./utils.js";
 
 export function convertToOpenAPISchema(
-  jsonSchema: JSONSchema7,
-  context: ToOpenAPISchemaContext
+  jsonSchema: JSONSchema7 | OpenAPIV3_1.SchemaObject,
+  context: ToOpenAPISchemaContext,
 ): OpenAPIV3_1.SchemaObject | OpenAPIV3_1.ReferenceObject {
-  const _jsonSchema = JSON.parse(JSON.stringify(jsonSchema));
+  const source = jsonSchema as Schema;
+  const locations = new Map<string, string>();
+  const documentName = schemaName(source);
+  let needsRoot = false;
 
-  // Handle nullable property conversion
-  if ("nullable" in _jsonSchema && _jsonSchema.nullable === true) {
-    if (_jsonSchema.type) {
-      // Convert type + nullable to type array
-      if (Array.isArray(_jsonSchema.type)) {
-        // If type is already an array, add null if not present
-        if (!_jsonSchema.type.includes("null")) {
-          _jsonSchema.type.push("null");
+  mapSchema(source, (schema, path) => {
+    const name = schema.ref ?? schema.$id;
+    if (typeof name === "string") locations.set(path, name);
+    for (const key of ["definitions", "$defs"]) {
+      for (const [name, definition] of Object.entries(schema[key] ?? {})) {
+        const location = `${path}/${key}/${pointerToken(name)}`;
+        // Named definitions remain readable. Vendor-generated names are local
+        // to one conversion and cannot be shared across unrelated schemas.
+        if (!locations.has(location))
+          locations.set(
+            location,
+            path !== "#"
+              ? `${documentName}_${schemaName({ location })}_${name}`
+              : name.startsWith("__schema")
+                ? `${documentName}_${name}`
+                : name,
+          );
+        if (typeof definition === "boolean") {
+          context.components.schemas ??= {};
+          context.components.schemas[locations.get(location)!] =
+            definition as unknown as OpenAPIV3_1.SchemaObject;
         }
-      } else {
-        // Convert single type to array with null
-        _jsonSchema.type = [_jsonSchema.type, "null"];
       }
-    } else {
-      // If no type specified but nullable is true, add null type
-      _jsonSchema.type = ["null"];
     }
-
-    // Remove the nullable property
-    delete _jsonSchema.nullable;
-  }
-
-  // Remove $schema reference if present
-  if (_jsonSchema.$schema) {
-    delete _jsonSchema.$schema;
-  }
-
-  // Recursively process nested schemas
-  const nestedSchemaKeys = [
-    "properties",
-    "additionalProperties",
-    "items",
-    "additionalItems",
-    "allOf",
-    "anyOf",
-    "oneOf",
-    "not",
-    "if",
-    "then",
-    "else",
-    "definitions",
-    "$defs",
-    "patternProperties",
-    "propertyNames",
-    "contains",
-    // "unevaluatedProperties",
-    // "unevaluatedItems",
-  ] as const;
-
-  nestedSchemaKeys.forEach((key) => {
     if (
-      _jsonSchema[key] &&
-      (typeof _jsonSchema[key] === "object" || Array.isArray(_jsonSchema[key]))
-    ) {
-      if (
-        key === "properties" ||
-        key === "definitions" ||
-        key === "$defs" ||
-        key === "patternProperties"
-      ) {
-        // These are objects containing schemas
-        for (const subKey in _jsonSchema[key]) {
-          _jsonSchema[key][subKey] = convertToOpenAPISchema(
-            _jsonSchema[key][subKey],
-            context
-          );
-        }
-      } else if (key === "allOf" || key === "anyOf" || key === "oneOf") {
-        // These are arrays of schemas
-        _jsonSchema[key] = _jsonSchema[key].map((item: any) =>
-          convertToOpenAPISchema(item, context)
-        );
-      } else if (key === "items") {
-        // Items can be a schema or array of schemas
-        if (Array.isArray(_jsonSchema[key])) {
-          _jsonSchema[key] = _jsonSchema[key].map((item: any) =>
-            convertToOpenAPISchema(item, context)
-          );
-        } else {
-          _jsonSchema[key] = convertToOpenAPISchema(_jsonSchema[key], context);
-        }
-      } else {
-        // Single schema properties
-        _jsonSchema[key] = convertToOpenAPISchema(_jsonSchema[key], context);
-      }
-    }
+      typeof schema.$ref === "string" &&
+      (schema.$ref === "#" ||
+        (schema.$ref.startsWith("#/") &&
+          !schema.$ref.startsWith("#/$defs/") &&
+          !schema.$ref.startsWith("#/definitions/") &&
+          !schema.$ref.startsWith("#/components/")))
+    )
+      needsRoot = true;
+    return schema;
   });
+  if (needsRoot && !locations.has("#")) locations.set("#", documentName);
 
-  // Hoist any leftover `$defs`/`definitions` into the shared components and
-  // strip them from the node. Some vendors (e.g. Effect Schema) emit a
-  // top-level `$defs` map alongside a container schema (`array`, `object`,
-  // `anyOf`, ...) even after their inner `$ref`s have been rewritten to
-  // `#/components/schemas/*`. Without this, the definitions would stay
-  // duplicated inline on the returned schema while `components.schemas` never
-  // receives them.
-  //
-  // Existing components win over the lifted defs: when a schema is
-  // `ref`/`$id`-annotated the vendor already registered the real definition
-  // and only leaves a self-referential `{ $ref }` stub inside `$defs`.
-  if (_jsonSchema.$defs || _jsonSchema.definitions) {
-    context.components.schemas = {
-      ..._jsonSchema.definitions,
-      ..._jsonSchema.$defs,
-      ...context.components.schemas,
-    };
+  const reference = (ref: string): string => {
+    if (ref.startsWith("#/components/")) return ref;
+    const location = [...locations.keys()]
+      .filter((path) => ref === path || ref.startsWith(`${path}/`))
+      .sort((a, b) => b.length - a.length)[0];
+    return location
+      ? `#/components/schemas/${pointerToken(locations.get(location)!)}${ref.slice(location.length)}`
+      : ref;
+  };
 
-    delete _jsonSchema.$defs;
-    delete _jsonSchema.definitions;
-  }
-
-  // If a ref is provided, use it to create a $ref in the OpenAPI components
-  if (_jsonSchema.ref || _jsonSchema.$id) {
-    const { ref, $id, ...component } = _jsonSchema;
-
-    const id = ref || $id;
-
-    context.components.schemas = {
-      ...context.components.schemas,
-      [id]: component,
-    };
-    return {
-      $ref: `#/components/schemas/${id}`,
-    };
-  } else if (_jsonSchema.$ref) {
-    // Happens in effect schemas — the referenced definitions were already
-    // hoisted from `$defs` above, so we only need to rewrite the pointer.
-    const { $ref } = _jsonSchema;
-
-    // Remove the '#/$defs/' prefix from Effect's internal references
-    const ref = $ref.split("/").pop();
-
-    return {
-      $ref: `#/components/schemas/${ref}`,
-    };
-  }
-
-  return _jsonSchema;
+  return mapSchema(source, (schema, path) => {
+    const result = mapNodeReferences(schema, reference);
+    delete result.$schema;
+    delete result.$defs;
+    delete result.definitions;
+    if (result.nullable === true) {
+      const types = Array.isArray(result.type)
+        ? result.type
+        : result.type
+          ? [result.type]
+          : [];
+      result.type = [...new Set([...types, "null"])];
+      delete result.nullable;
+    }
+    const name = locations.get(path);
+    if (name) {
+      delete result.ref;
+      delete result.$id;
+      context.components.schemas ??= {};
+      const componentRef = `#/components/schemas/${pointerToken(name)}`;
+      // A metadata vendor can already have emitted the real component.
+      if (
+        !(
+          Object.keys(result).length === 1 &&
+          result.$ref === componentRef &&
+          context.components.schemas[name]
+        )
+      ) {
+        const existing = context.components.schemas[name];
+        if (
+          existing !== undefined &&
+          JSON.stringify(existing) !== JSON.stringify(result)
+        ) {
+          throw new Error(
+            `standard-openapi: Conflicting schema component "${name}".`,
+          );
+        }
+        context.components.schemas[name] = result;
+      }
+      return { $ref: componentRef };
+    }
+    return result;
+  }) as OpenAPIV3_1.SchemaObject;
 }
