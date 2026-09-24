@@ -66,23 +66,25 @@ export function convertToOpenAPISchema(
   };
 
   return mapSchema(source, (schema, path) => {
-    const result = mapNodeReferences(schema, reference);
+    let result = mapNodeReferences(schema, reference);
     delete result.$schema;
     delete result.$defs;
     delete result.definitions;
-    if (result.nullable === true) {
-      const types = Array.isArray(result.type)
-        ? result.type
-        : result.type
-          ? [result.type]
-          : [];
-      result.type = [...new Set([...types, "null"])];
-      delete result.nullable;
-    }
     const name = locations.get(path);
     if (name) {
       delete result.ref;
       delete result.$id;
+    }
+    if (result.nullable === true) {
+      delete result.nullable;
+      if (result.type === undefined) {
+        result = { anyOf: [result, { type: "null" }] };
+      } else {
+        const types = Array.isArray(result.type) ? result.type : [result.type];
+        result.type = [...new Set([...types, "null"])];
+      }
+    }
+    if (name) {
       context.components.schemas ??= {};
       const componentRef = `#/components/schemas/${pointerToken(name)}`;
       // A metadata vendor can already have emitted the real component.

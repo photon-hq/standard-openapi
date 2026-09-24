@@ -89,7 +89,7 @@ it("preserves strict, open and typed objects in nested unions", async () => {
       ],
     });
     const variants = (
-      result.schema.properties?.value as {
+      result.schema.properties!.value as {
         anyOf: { additionalProperties?: unknown }[];
       }
     ).anyOf;

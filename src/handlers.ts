@@ -70,42 +70,41 @@ export const toOpenAPISchema = async (
       }),
     );
   };
-  // Preserve other component kinds supplied by a custom vendor, including
-  // references to its direction-specific schemas, without changing examples.
+  // Prepare and check every definition before changing the caller's map.
+  // A conflict in a later kind or schema must leave the document unchanged.
+  const pending: Record<string, Record<string, unknown>> = {};
   for (const [kind, values] of Object.entries(generated)) {
-    if (kind === "schemas") continue;
+    pending[kind] =
+      kind === "schemas"
+        ? Object.fromEntries(
+            Object.entries(values ?? {}).map(([name, value]) => [
+              io ? `${io}__${name}` : name,
+              rewrite(value as Schema),
+            ]),
+          )
+        : (rewriteComponent(values) as Record<string, unknown>);
+  }
+  for (const [kind, definitions] of Object.entries(pending)) {
     const existing = components[kind as keyof typeof components];
-    const definitions = rewriteComponent(values) as Record<string, unknown>;
     for (const [name, definition] of Object.entries(definitions)) {
       if (
         existing?.[name] !== undefined &&
         JSON.stringify(existing[name]) !== JSON.stringify(definition)
       ) {
+        const label = kind === "schemas" ? "schema" : kind;
         throw new Error(
-          `standard-openapi: Conflicting ${kind} component "${name}".`,
+          `standard-openapi: Conflicting ${label} component "${name}".`,
         );
       }
     }
-    Object.assign(components, {
-      [kind]: { ...existing, ...definitions },
-    });
   }
-  for (const [name, value] of Object.entries(generated.schemas ?? {})) {
-    const key = io ? `${io}__${name}` : name;
-    const definition = rewrite(value as Schema) as OpenAPIV3_1.SchemaObject;
-    components.schemas ??= {};
-    if (
-      components.schemas[key] !== undefined &&
-      JSON.stringify(components.schemas[key]) !== JSON.stringify(definition)
-    ) {
-      throw new Error(
-        `standard-openapi: Conflicting schema component "${key}".`,
-      );
-    }
-    components.schemas[key] = definition;
+  const rewrittenSchema = rewrite(result as Schema) as OpenAPIV3_1.SchemaObject;
+  for (const [kind, definitions] of Object.entries(pending)) {
+    const existing = components[kind as keyof typeof components];
+    Object.assign(components, { [kind]: { ...existing, ...definitions } });
   }
   return {
-    schema: rewrite(result as Schema) as OpenAPIV3_1.SchemaObject,
+    schema: rewrittenSchema,
     components: Object.keys(components).length > 0 ? components : undefined,
   };
 };
