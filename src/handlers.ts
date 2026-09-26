@@ -31,18 +31,40 @@ export const toOpenAPISchema = async (
       : undefined);
   // Vendors get a fresh component map; a reused schema cannot change a
   // definition already emitted for the opposite side of an operation.
-  const conversion = {
-    components: {},
-    options,
-    io,
-  } satisfies ToOpenAPISchemaContext;
-  const converted = await fn(schema, conversion);
-  const result = convertToOpenAPISchema(converted, conversion);
-  const generated: OpenAPIV3_1.ComponentsObject = conversion.components;
+  const convert = async (direction: typeof io) => {
+    const conversion = {
+      components: {},
+      options,
+      io: direction,
+    } satisfies ToOpenAPISchemaContext;
+    const converted = await fn(schema, conversion);
+    const result = convertToOpenAPISchema(converted, conversion);
+    return {
+      result,
+      components: conversion.components as OpenAPIV3_1.ComponentsObject,
+    };
+  };
+  const { result, components: generated } = await convert(io);
+  // Response schemas keep their names. A request schema keeps the same name
+  // when its request representation is identical to its response
+  // representation, and is named `<Name>Input` when they differ.
+  const inputOnly =
+    io === "input" && Object.keys(generated.schemas ?? {}).length > 0
+      ? inputSpecificSchemas(
+          generated.schemas ?? {},
+          await convert("output").then(
+            ({ components }) => components.schemas ?? {},
+            // Without a response representation there is nothing to compare.
+            () => ({}),
+          ),
+        )
+      : new Set<string>();
+  const componentName = (name: string) =>
+    inputOnly.has(name) ? `${name}Input` : name;
   const names = new Map(
     Object.keys(generated.schemas ?? {}).map((name) => [
       `#/components/schemas/${pointerToken(name)}`,
-      `#/components/schemas/${pointerToken(io ? `${io}__${name}` : name)}`,
+      `#/components/schemas/${pointerToken(componentName(name))}`,
     ]),
   );
   const reference = (ref: string) => {
@@ -78,7 +100,7 @@ export const toOpenAPISchema = async (
       kind === "schemas"
         ? Object.fromEntries(
             Object.entries(values ?? {}).map(([name, value]) => [
-              io ? `${io}__${name}` : name,
+              componentName(name),
               rewrite(value as Schema),
             ]),
           )
@@ -93,7 +115,7 @@ export const toOpenAPISchema = async (
       ) {
         const label = kind === "schemas" ? "schema" : kind;
         throw new Error(
-          `standard-openapi: Conflicting ${label} component "${name}".`,
+          `standard-openapi: Conflicting ${label} component "${name}". Two different definitions use this name; give each a distinct name.`,
         );
       }
     }
@@ -108,6 +130,65 @@ export const toOpenAPISchema = async (
     components: Object.keys(components).length > 0 ? components : undefined,
   };
 };
+
+/** Serializes JSON with sorted object keys, so key order never matters. */
+const canonical = (value: unknown): string =>
+  JSON.stringify(value, (_key, child: unknown) =>
+    child && typeof child === "object" && !Array.isArray(child)
+      ? Object.fromEntries(
+          Object.keys(child)
+            .sort()
+            .map((key) => [key, (child as Record<string, unknown>)[key]]),
+        )
+      : child,
+  );
+
+/**
+ * Finds the request components whose representation differs from the response
+ * representation of the same name. A component that refers to one of them
+ * differs too, because the reference target is named differently.
+ */
+function inputSpecificSchemas(
+  input: Record<string, unknown>,
+  output: Record<string, unknown>,
+) {
+  const differing = new Set(
+    Object.entries(input)
+      .filter(
+        ([name, definition]) =>
+          output[name] !== undefined &&
+          canonical(output[name]) !== canonical(definition),
+      )
+      .map(([name]) => name),
+  );
+  const prefix = "#/components/schemas/";
+  const targets = new Map(
+    Object.entries(input).map(([name, definition]) => {
+      const found = new Set<string>();
+      mapSchema(definition as Schema, (node) =>
+        mapNodeReferences(node, (ref) => {
+          if (ref.startsWith(prefix)) {
+            const token = ref.slice(prefix.length).split("/")[0];
+            found.add(token.replaceAll("~1", "/").replaceAll("~0", "~"));
+          }
+          return ref;
+        }),
+      );
+      return [name, found];
+    }),
+  );
+  for (let changed = true; changed; ) {
+    changed = false;
+    for (const [name, found] of targets) {
+      if (differing.has(name)) continue;
+      if ([...found].some((target) => differing.has(target))) {
+        differing.add(name);
+        changed = true;
+      }
+    }
+  }
+  return differing;
+}
 
 /**
  * Load vendor before calling toOpenAPISchema,
