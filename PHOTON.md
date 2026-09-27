@@ -95,9 +95,9 @@ path while retaining this explicit Zod 3 limitation; it does not establish that
 all supported Zod 3 output schemas are accurate.
 
 Version `0.2.9-photon.2` contains the direction changes, with component names
-prefixed `input__Name` / `output__Name`. The naming rules above (no prefixes,
-`<Name>Input` only when representations differ, no generated hash names) are
-unreleased and need the next `-photon.N` version. Release this package first,
-then pin that exact version in hono-openapi and verify that package before
-releasing the chassis and adopting it in services. Services must name every
-recursive or reused schema before adopting it.
+prefixed `input__Name` / `output__Name`. Version `0.2.9-photon.3` adds the
+naming rules above (no prefixes, `<Name>Input` only when representations
+differ, no generated hash names). Release this package first, then pin that
+exact version in hono-openapi and verify that package before releasing the
+chassis and adopting it in services. Services must name every recursive or
+reused schema before adopting it.
