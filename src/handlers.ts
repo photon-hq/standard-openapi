@@ -54,13 +54,19 @@ export const toOpenAPISchema = async (
           generated.schemas ?? {},
           await convert("output").then(
             ({ components }) => components.schemas ?? {},
-            // Without a response representation there is nothing to compare.
-            () => ({}),
+            // Without a response representation, treat every request component as request-specific.
+            () => null,
           ),
         )
       : new Set<string>();
   const componentName = (name: string) =>
     inputOnly.has(name) ? `${name}Input` : name;
+  const targets = Object.keys(generated.schemas ?? {}).map(componentName);
+  const clash = targets.find((name, i) => targets.indexOf(name) !== i);
+  if (clash)
+    throw new Error(
+      `standard-openapi: Conflicting schema component "${clash}". Two different definitions use this name; give each a distinct name.`,
+    );
   const names = new Map(
     Object.keys(generated.schemas ?? {}).map((name) => [
       `#/components/schemas/${pointerToken(name)}`,
@@ -150,8 +156,9 @@ const canonical = (value: unknown): string =>
  */
 function inputSpecificSchemas(
   input: Record<string, unknown>,
-  output: Record<string, unknown>,
+  output: Record<string, unknown> | null,
 ) {
+  if (!output) return new Set(Object.keys(input));
   const differing = new Set(
     Object.entries(input)
       .filter(

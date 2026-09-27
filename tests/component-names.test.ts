@@ -147,3 +147,53 @@ it("names nested definitions by their keys without hashing", () => {
     ),
   ).toThrow("Cannot name the reused or recursive schema");
 });
+
+it("rejects a renamed request component that collides with another in the same request", async () => {
+  const foo = z.object({ count: z.number().default(1) }).meta({ ref: "Foo" });
+  const fooInput = z
+    .strictObject({ label: z.string() })
+    .meta({ ref: "FooInput" });
+  for (const body of [
+    z.object({ a: foo, b: fooInput }),
+    z.object({ b: fooInput, a: foo }),
+  ]) {
+    await expect(
+      toOpenAPISchema(body, { io: "input", components: {} }),
+    ).rejects.toThrow('Conflicting schema component "FooInput"');
+  }
+});
+
+it("names every request component <Name>Input when the response conversion fails", async () => {
+  const settings = z
+    .object({ retries: z.number().default(3) })
+    .meta({ ref: "Settings" });
+  const widget = z
+    .object({ settings, length: z.string().transform((s) => s.length) })
+    .meta({ ref: "Widget" });
+  const components: ToOpenAPISchemaContext["components"] = {};
+  const input = await toOpenAPISchema(widget, { io: "input", components });
+  expect(input.schema).toEqual({ $ref: "#/components/schemas/WidgetInput" });
+  expect(names(components)).toEqual(["SettingsInput", "WidgetInput"]);
+  // The response keeps the bare name without conflicting with the request.
+  await toOpenAPISchema(settings, { io: "output", components });
+  expect(names(components)).toEqual([
+    "Settings",
+    "SettingsInput",
+    "WidgetInput",
+  ]);
+});
+
+it("rejects two nested boolean definitions with the same name", () => {
+  expect(() =>
+    convertToOpenAPISchema(
+      {
+        type: "object",
+        properties: {
+          a: { $defs: { Flag: true }, $ref: "#/properties/a/$defs/Flag" },
+          b: { $defs: { Flag: false }, $ref: "#/properties/b/$defs/Flag" },
+        },
+      },
+      { components: {} },
+    ),
+  ).toThrow('Conflicting schema component "Flag"');
+});

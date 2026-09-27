@@ -44,7 +44,7 @@ the vendor took from `id`). With explicit direction:
   `<Name>Input` (for example `WidgetInput`) when they differ. A component that
   refers to a request-specific component is request-specific too. The converter
   decides this by also converting the schema in the opposite direction; if that
-  conversion fails, the request component keeps its name.
+  conversion fails, every request component is named `<Name>Input`.
 
 Without direction, names are used as they are. The converter never invents a
 name. A reused or recursive definition that the vendor extracted without a
@@ -58,7 +58,9 @@ the same reason. Nested definitions keep their keys as names.
 References are relocated with their pointer suffixes and sibling constraints
 intact; external references and example/default data are preserved. Conflicting
 definitions under one name fail instead of overwriting one another, so names must
-be unique across the schemas combined into one document.
+be unique across the schemas combined into one document. A request component
+renamed `<Name>Input` that meets another definition already named `<Name>Input`
+fails the same way.
 
 Direction does not make strict objects open or change a typed catchall to `any`.
 Response extensibility and choice of reader versus producer contracts remain

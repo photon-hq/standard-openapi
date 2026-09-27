@@ -86,7 +86,13 @@ export function convertToOpenAPISchema(
   }
   for (const [location, definition] of booleans) {
     context.components.schemas ??= {};
-    context.components.schemas[locations.get(location)!] =
+    const name = locations.get(location)!;
+    const existing: unknown = context.components.schemas[name];
+    if (existing !== undefined && existing !== definition)
+      throw new Error(
+        `standard-openapi: Conflicting schema component "${name}". Two different schemas use this name; give each a distinct name.`,
+      );
+    context.components.schemas[name] =
       definition as unknown as OpenAPIV3_1.SchemaObject;
   }
 
