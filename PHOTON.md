@@ -41,7 +41,8 @@ the vendor took from `id`). With explicit direction:
 - a response (`io: "output"`) component keeps its name, for example `Widget`;
 - a request (`io: "input"`) component keeps the same name when its request
   representation is identical to its response representation, and is named
-  `<Name>Input` (for example `WidgetInput`) when they differ. A component that
+  `<Name>Input` (for example `WidgetInput`) when they differ or when only the
+  request uses it (for example the input side of `.pipe()`). A component that
   refers to a request-specific component is request-specific too. The converter
   decides this by also converting the schema in the opposite direction; if that
   conversion fails, every request component is named `<Name>Input`.

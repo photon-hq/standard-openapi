@@ -124,6 +124,22 @@ it("names a differing request representation <Name>Input across repeated convers
   );
 });
 
+it("names a request-only schema <Name>Input in either conversion order", async () => {
+  const X = z.object({ n: z.string().default("a") }).meta({ ref: "X" });
+  const request = X.pipe(z.object({ n: z.string() }));
+  for (const requestFirst of [true, false]) {
+    const components: ToOpenAPISchemaContext["components"] = {};
+    if (!requestFirst) await toOpenAPISchema(X, { io: "output", components });
+    const input = await toOpenAPISchema(request, { io: "input", components });
+    if (requestFirst) await toOpenAPISchema(X, { io: "output", components });
+    expect(input.schema).toEqual({ $ref: "#/components/schemas/XInput" });
+    expect(Object.keys(components.schemas ?? {}).sort()).toEqual([
+      "X",
+      "XInput",
+    ]);
+  }
+});
+
 it("uses output types for pipes without changing runtime parsing", async () => {
   const schema = z
     .string()

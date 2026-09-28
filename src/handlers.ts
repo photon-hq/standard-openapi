@@ -151,7 +151,8 @@ const canonical = (value: unknown): string =>
 
 /**
  * Finds the request components whose representation differs from the response
- * representation of the same name. A component that refers to one of them
+ * representation of the same name, or that have no response representation. A
+ * component that refers to one of them
  * differs too, because the reference target is named differently.
  */
 function inputSpecificSchemas(
@@ -163,7 +164,9 @@ function inputSpecificSchemas(
     Object.entries(input)
       .filter(
         ([name, definition]) =>
-          output[name] !== undefined &&
+          // A schema only the request uses (for example the input side of
+          // `.pipe()`) is request-specific too.
+          output[name] === undefined ||
           canonical(output[name]) !== canonical(definition),
       )
       .map(([name]) => name),
