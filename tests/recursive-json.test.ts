@@ -46,3 +46,26 @@ it("rejects an unnamed recursive JSON value instead of inventing a name", async 
     /Cannot name the reused or recursive schema at #\/\$defs\/__schema0 \(referenced from #\/additionalProperties\)\. Name it with metadata/,
   );
 });
+
+it("resolves references to a $defs alias of a recursive JSON value", async () => {
+  const JsonValue = z.json().meta({ ref: "JsonValue", id: "JsonValue" });
+  const schema = z.object({ a: JsonValue });
+
+  for (const [root, value] of [
+    ["Root", schema.meta({ ref: "Root" })],
+    [undefined, schema],
+  ] as const) {
+    const result = await toOpenAPISchema(value);
+    const body = root ? result.components?.schemas?.[root] : result.schema;
+    expect(body).toMatchObject({
+      properties: { a: { $ref: "#/components/schemas/JsonValue" } },
+    });
+    for (const reference of localReferences(result)) {
+      const path = reference
+        .slice(2)
+        .split("/")
+        .map((part) => part.replaceAll("~1", "/").replaceAll("~0", "~"));
+      expect(result).toHaveProperty(path);
+    }
+  }
+});

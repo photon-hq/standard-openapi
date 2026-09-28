@@ -48,12 +48,13 @@ export function convertToOpenAPISchema(
   // A named schema that only points at a generated definition (for example
   // `z.json().meta({ ref: "JsonValue" })`) lends that definition its name.
   // The wrapper then stays a reference at its use site.
-  const aliases = new Set<string>();
+  // Alias location → the generated definition it points at.
+  const aliases = new Map<string, string>();
   for (const { path, name, ref } of named) {
     const definition = typeof ref === "string" ? unnamed.get(ref) : undefined;
     if (!definition) continue;
     definition.names.add(name);
-    aliases.add(path);
+    aliases.set(path, ref as string);
   }
   for (const [location, { names }] of unnamed) {
     if (names.size === 1) {
@@ -67,11 +68,15 @@ export function convertToOpenAPISchema(
         : `standard-openapi: The reused or recursive schema at ${location} has several names (${[...names].map((name) => `"${name}"`).join(", ")}). Use one name for it.`,
     );
   }
-  for (const path of aliases) locations.delete(path);
+  for (const path of aliases.keys()) locations.delete(path);
+  // A reference to an alias's own location (for example a `$defs` entry that
+  // Zod 4 emits for the wrapper) points at the named target instead.
+  const resolve = (ref: string) => aliases.get(ref) ?? ref;
   // A local pointer outside every named definition refers into the root, so
   // the root must be a named component too.
   if (!locations.has("#")) {
-    for (const [ref, use] of uses) {
+    for (const [alias, use] of uses) {
+      const ref = resolve(alias);
       if (
         (ref === "#" || ref.startsWith("#/")) &&
         !ref.startsWith("#/components/") &&
@@ -96,7 +101,8 @@ export function convertToOpenAPISchema(
       definition as unknown as OpenAPIV3_1.SchemaObject;
   }
 
-  const reference = (ref: string): string => {
+  const reference = (original: string): string => {
+    const ref = resolve(original);
     if (ref.startsWith("#/components/")) return ref;
     const location = [...locations.keys()]
       .filter((path) => ref === path || ref.startsWith(`${path}/`))
