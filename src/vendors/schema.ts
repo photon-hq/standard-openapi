@@ -58,14 +58,6 @@ export function mapSchema(
   return visit(result, path);
 }
 
-/** Stable document-local names keep anonymous definitions from different conversions apart. */
-export function schemaName(schema: Schema): string {
-  let hash = 2166136261;
-  for (const char of JSON.stringify(schema))
-    hash = Math.imul(hash ^ char.charCodeAt(0), 16777619);
-  return `Schema_${(hash >>> 0).toString(16)}`;
-}
-
 /** Discriminator mappings carry references outside the $ref keyword. */
 export function mapNodeReferences(
   node: Exclude<Schema, boolean>,

@@ -26,7 +26,7 @@ it.each(["parameters", "schemas"] as const)(
     });
     const components: ToOpenAPISchemaContext["components"] =
       kind === "schemas"
-        ? { schemas: { output__Taken: { type: "number" } } }
+        ? { schemas: { Taken: { type: "number" } } }
         : {
             parameters: {
               Taken: { name: "name", in: "query", schema: { type: "number" } },
@@ -37,7 +37,7 @@ it.each(["parameters", "schemas"] as const)(
       toOpenAPISchema(schema, { io: "output", components }),
     ).rejects.toThrow(
       kind === "schemas"
-        ? 'Conflicting schema component "output__Taken"'
+        ? 'Conflicting schema component "Taken"'
         : 'Conflicting parameters component "Taken"',
     );
     expect(components).toEqual(before);
@@ -58,11 +58,11 @@ it("preserves a nullable Zod 3 reference emitted in OpenAPI 3.0 mode", async () 
   });
   expect(result.schema).toEqual({
     anyOf: [
-      { allOf: [{ $ref: "#/components/schemas/output__Person" }] },
+      { allOf: [{ $ref: "#/components/schemas/Person" }] },
       { type: "null" },
     ],
   });
-  expect(result.components?.schemas?.output__Person).toMatchObject({
+  expect(result.components?.schemas?.Person).toMatchObject({
     type: "object",
     required: ["name"],
     properties: { name: { type: "string" } },

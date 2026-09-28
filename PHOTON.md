@@ -35,12 +35,33 @@ conversion behavior; the context does not invent a representation for arbitrary
 runtime transformations. Supply an explicit JSON output schema for those.
 Without explicit direction, the existing Zod input default is retained.
 
-Explicit direction scopes generated component names as `input__Name` and
-`output__Name`. Anonymous recursive components have deterministic document-local
-names. References are relocated with their pointer suffixes and sibling
-constraints intact; external references and example/default data are preserved.
-Callers must follow the emitted references rather than relying on anonymous
-component names. Conflicting definitions fail instead of overwriting one another.
+Component names come from schema metadata (`ref`, `$id`, or a definition key
+the vendor took from `id`). With explicit direction:
+
+- a response (`io: "output"`) component keeps its name, for example `Widget`;
+- a request (`io: "input"`) component keeps the same name when its request
+  representation is identical to its response representation, and is named
+  `<Name>Input` (for example `WidgetInput`) when they differ or when only the
+  request uses it (for example the input side of `.pipe()`). A component that
+  refers to a request-specific component is request-specific too. The converter
+  decides this by also converting the schema in the opposite direction; if that
+  conversion fails, every request component is named `<Name>Input`.
+
+Without direction, names are used as they are. The converter never invents a
+name. A reused or recursive definition that the vendor extracted without a
+name (Zod's `__schemaN`, from recursion or `reused: "ref"`) takes the name of
+the named schema that only points at it, so `z.json().meta({ ref: "JsonValue" })`
+becomes the `JsonValue` component. When no such name exists, or several names
+point at one definition, conversion fails with an error that names the location;
+name the schema with `.meta({ ref: "Name" })`. A recursive root needs a name for
+the same reason. Nested definitions keep their keys as names.
+
+References are relocated with their pointer suffixes and sibling constraints
+intact; external references and example/default data are preserved. Conflicting
+definitions under one name fail instead of overwriting one another, so names must
+be unique across the schemas combined into one document. A request component
+renamed `<Name>Input` that meets another definition already named `<Name>Input`
+fails the same way.
 
 Direction does not make strict objects open or change a typed catchall to `any`.
 Response extensibility and choice of reader versus producer contracts remain
@@ -76,6 +97,10 @@ removal is included. A green suite therefore qualifies the selected Photon Zod 4
 path while retaining this explicit Zod 3 limitation; it does not establish that
 all supported Zod 3 output schemas are accurate.
 
-Version `0.2.9-photon.2` contains these changes and has not been published yet.
-Release this package first, then pin that exact version in hono-openapi and
-verify that package before releasing the chassis and adopting it in services.
+Version `0.2.9-photon.2` contains the direction changes, with component names
+prefixed `input__Name` / `output__Name`. Version `0.2.9-photon.3` adds the
+naming rules above (no prefixes, `<Name>Input` only when representations
+differ, no generated hash names). Release this package first, then pin that
+exact version in hono-openapi and verify that package before releasing the
+chassis and adopting it in services. Services must name every recursive or
+reused schema before adopting it.

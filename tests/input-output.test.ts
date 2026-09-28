@@ -97,7 +97,7 @@ it("preserves strict, open and typed objects in nested unions", async () => {
   }
 });
 
-it("keeps named input and output components independent across repeated conversions", async () => {
+it("names a differing request representation <Name>Input across repeated conversions", async () => {
   const shared = z
     .object({ count: z.number().default(1) })
     .meta({ ref: "Shared" });
@@ -105,14 +105,16 @@ it("keeps named input and output components independent across repeated conversi
   const input = await toOpenAPISchema(shared, { io: "input", components });
   const before = structuredClone(components);
   const output = await toOpenAPISchema(shared, { io: "output", components });
-  expect(input.schema).toEqual({ $ref: "#/components/schemas/input__Shared" });
-  expect(output.schema).toEqual({
-    $ref: "#/components/schemas/output__Shared",
+  expect(input.schema).toEqual({
+    $ref: "#/components/schemas/SharedInput",
   });
-  expect(components.schemas?.input__Shared).toEqual(
-    before.schemas?.input__Shared,
-  );
-  expect(components.schemas?.output__Shared).toMatchObject({
+  expect(output.schema).toEqual({ $ref: "#/components/schemas/Shared" });
+  expect(Object.keys(components.schemas ?? {}).sort()).toEqual([
+    "Shared",
+    "SharedInput",
+  ]);
+  expect(components.schemas?.SharedInput).toEqual(before.schemas?.SharedInput);
+  expect(components.schemas?.Shared).toMatchObject({
     required: ["count"],
     additionalProperties: false,
   });
@@ -120,6 +122,22 @@ it("keeps named input and output components independent across repeated conversi
   expect(await toOpenAPISchema(shared, { io: "input", components })).toEqual(
     input,
   );
+});
+
+it("names a request-only schema <Name>Input in either conversion order", async () => {
+  const X = z.object({ n: z.string().default("a") }).meta({ ref: "X" });
+  const request = X.pipe(z.object({ n: z.string() }));
+  for (const requestFirst of [true, false]) {
+    const components: ToOpenAPISchemaContext["components"] = {};
+    if (!requestFirst) await toOpenAPISchema(X, { io: "output", components });
+    const input = await toOpenAPISchema(request, { io: "input", components });
+    if (requestFirst) await toOpenAPISchema(X, { io: "output", components });
+    expect(input.schema).toEqual({ $ref: "#/components/schemas/XInput" });
+    expect(Object.keys(components.schemas ?? {}).sort()).toEqual([
+      "X",
+      "XInput",
+    ]);
+  }
 });
 
 it("uses output types for pipes without changing runtime parsing", async () => {
@@ -136,44 +154,52 @@ it("uses output types for pipes without changing runtime parsing", async () => {
   ).toMatchObject({ type: "number" });
 });
 
-it("keeps recursive roots and definitions local to their direction", async () => {
-  const node = z.object({
-    name: z.string().default("root"),
-    get children() {
-      return z.array(node).optional();
-    },
+it("names recursive definitions from metadata on each side", async () => {
+  const node = z
+    .object({
+      name: z.string().default("root"),
+      get children() {
+        return z.array(node).optional();
+      },
+    })
+    .meta({ ref: "Node" });
+  const schema = z.object({
+    first: node,
+    second: node,
+    json: z.json().meta({ ref: "JsonValue" }),
   });
-  const schema = z.object({ first: node, second: node, json: z.json() });
-  for (const io of ["input", "output"] as const) {
+  for (const [io, names] of [
+    ["input", ["JsonValue", "NodeInput"]],
+    ["output", ["JsonValue", "Node"]],
+  ] as const) {
     const result = await toOpenAPISchema(schema, {
       io,
       options: { reused: "ref" },
     });
+    expect(Object.keys(result.components?.schemas ?? {}).sort()).toEqual(names);
     const visit = (value: unknown): void => {
       if (!value || typeof value !== "object") return;
       for (const [key, child] of Object.entries(value)) {
         if (key === "$ref" && typeof child === "string") {
-          expect(child.startsWith(`#/components/schemas/${io}__`)).toBe(true);
-          expect(result).toHaveProperty(
-            child
-              .slice(2)
-              .split("/")
-              .map((part) => part.replaceAll("~1", "/").replaceAll("~0", "~")),
+          expect(names.map((name) => `#/components/schemas/${name}`)).toContain(
+            child,
           );
+          expect(result).toHaveProperty(child.slice(2).split("/"));
         } else visit(child);
       }
     };
     visit(result);
-    expect(
-      schema.parse({ first: {}, second: {}, json: { nested: [null, true] } }),
-    ).toMatchObject({ first: { name: "root" } });
   }
+  expect(
+    schema.parse({ first: {}, second: {}, json: { nested: [null, true] } }),
+  ).toMatchObject({ first: { name: "root" } });
 });
 
 it("preserves local pointer suffixes, ref siblings, external refs and annotation data", () => {
   const context: ToOpenAPISchemaContext = { components: {} };
   const result = convertToOpenAPISchema(
     {
+      $id: "Root",
       type: "object",
       definitions: {
         Node: {
@@ -215,7 +241,7 @@ it("preserves local pointer suffixes, ref siblings, external refs and annotation
   });
 });
 
-it("retains boolean definitions and scopes separate anonymous recursive schemas", async () => {
+it("retains boolean definitions and rejects anonymous recursive schemas", async () => {
   const context: ToOpenAPISchemaContext = { components: {} };
   const result = convertToOpenAPISchema(
     {
@@ -237,17 +263,23 @@ it("retains boolean definitions and scopes separate anonymous recursive schemas"
       return first.optional();
     },
   });
-  const second = z.object({
-    value: z.number(),
-    get next() {
-      return second.optional();
-    },
-  });
+  await expect(toOpenAPISchema(first, { io: "output" })).rejects.toThrow(
+    /Cannot name the recursive root schema .*\.meta\(\{ ref: "Name" \}\)/,
+  );
+  const second = z
+    .object({
+      value: z.number(),
+      get next() {
+        return second.optional();
+      },
+    })
+    .meta({ ref: "Chain" });
   const components: ToOpenAPISchemaContext["components"] = {};
-  const one = await toOpenAPISchema(first, { components, io: "output" });
-  const two = await toOpenAPISchema(second, { components, io: "output" });
-  expect(one.schema).not.toEqual(two.schema);
-  expect(Object.keys(components.schemas ?? {})).toHaveLength(2);
+  const named = await toOpenAPISchema(second, { components, io: "output" });
+  expect(named.schema).toEqual({ $ref: "#/components/schemas/Chain" });
+  expect(components.schemas?.Chain).toMatchObject({
+    properties: { next: { $ref: "#/components/schemas/Chain" } },
+  });
 });
 
 it("forwards Valibot pipeline direction using its native typeMode", async () => {
@@ -309,14 +341,14 @@ it("retains custom vendor components and leaves example references as data", asy
   });
   const result = await toOpenAPISchema(schema, { io: "output" });
   expect(result.components?.headers?.Name).toEqual({
-    schema: { $ref: "#/components/schemas/output__Text" },
+    schema: { $ref: "#/components/schemas/Text" },
   });
   expect(result.components?.examples?.Sample).toEqual({
     value: { $ref: "#/components/schemas/Text" },
   });
 });
 
-it("scopes a discriminator's schema-name mapping in an output representation", async () => {
+it("renames a discriminator's schema-name mapping to an input-specific component", async () => {
   const schema = z.object({ kind: z.literal("dog") });
   Object.assign(schema["~standard"], { vendor: "custom-union-test" });
   loadVendor("custom-union-test", (_schema, context) => {
@@ -324,6 +356,7 @@ it("scopes a discriminator's schema-name mapping in an output representation", a
       Dog: {
         type: "object",
         properties: { kind: { type: "string", enum: ["dog"] } },
+        ...(context.io === "output" && { required: ["kind"] }),
       },
     };
     return {
@@ -331,11 +364,17 @@ it("scopes a discriminator's schema-name mapping in an output representation", a
       discriminator: { propertyName: "kind", mapping: { dog: "Dog" } },
     };
   });
+  expect((await toOpenAPISchema(schema, { io: "input" })).schema).toMatchObject(
+    {
+      oneOf: [{ $ref: "#/components/schemas/DogInput" }],
+      discriminator: { mapping: { dog: "#/components/schemas/DogInput" } },
+    },
+  );
   expect(
     (await toOpenAPISchema(schema, { io: "output" })).schema,
   ).toMatchObject({
-    oneOf: [{ $ref: "#/components/schemas/output__Dog" }],
-    discriminator: { mapping: { dog: "#/components/schemas/output__Dog" } },
+    oneOf: [{ $ref: "#/components/schemas/Dog" }],
+    discriminator: { mapping: { dog: "Dog" } },
   });
 });
 
@@ -343,7 +382,9 @@ it("rejects conflicting non-schema components without replacing earlier definiti
   const schema = z.string();
   Object.assign(schema["~standard"], { vendor: "shared-header-test" });
   loadVendor("shared-header-test", (_schema, context) => {
-    context.components.schemas = { Text: { type: "string" } };
+    context.components.schemas = {
+      Text: { type: "string", ...(context.io === "input" && { minLength: 1 }) },
+    };
     context.components.headers = {
       Name: { schema: { $ref: "#/components/schemas/Text" } },
     };
@@ -351,6 +392,9 @@ it("rejects conflicting non-schema components without replacing earlier definiti
   });
   const components: ToOpenAPISchemaContext["components"] = {};
   await toOpenAPISchema(schema, { io: "input", components });
+  expect(components.headers?.Name).toEqual({
+    schema: { $ref: "#/components/schemas/TextInput" },
+  });
   const before = structuredClone(components);
   // An identical repeated definition is safe to share.
   await toOpenAPISchema(schema, { io: "input", components });
