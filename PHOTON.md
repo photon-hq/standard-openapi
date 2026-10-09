@@ -10,10 +10,20 @@ root schema is a container rather than a reference. No Photon converter patch
 is applied. A regression test covers the recursive Zod JSON record used by
 webhooks.
 
-To publish a new version, update `package.json`, merge the change to `main`,
-then run the **Publish GitHub Package** workflow. Versions are immutable;
-increment the `-photon.N` suffix for Photon changes to the same upstream version.
-The workflow publishes with its repository's `GITHUB_TOKEN`.
+Every push to `main` publishes a staging build, `X.Y.Z-staging.<run>.<attempt>`,
+under the `staging` dist-tag and stores its `X.Y.Z` production candidate on a
+`standard-openapi-staging-*` prerelease. To release, run **Promote to
+production** with that staging version and approve the `production` deployment.
+It publishes the stored candidate under `latest` without rebuilding and tags
+`vX.Y.Z`. See buildspace's
+[npm stage and promote](https://github.com/photon-hq/buildspace#npm-stage-and-promote)
+workflows.
+
+Releases are stable `X.Y.Z` versions. `0.2.9-photon.3` was the last `-photon.N`
+prerelease, and `0.2.9` is the first stable release of that line. Bump the
+version in a pull request before each promotion; a version is released once.
+Versions after `0.2.9` are Photon's own and don't follow upstream's numbering,
+so record the upstream base commit here when syncing.
 
 Keep the upstream MIT license. Compare this fork with the next upstream release
 before updating its base or switching consumers back to the upstream package.
